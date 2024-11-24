@@ -7,7 +7,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
-
+#define DEBUG
 #define MAX_CACHE_SIZE 256
 #define MAX_BLOCK_SIZE 256
 
@@ -62,7 +62,8 @@ typedef struct cacheStruct
 
 /* Global Cache variable */
 cacheStruct cache;
-
+int miss;
+int hits;
 void printAction(int, int, enum actionType);
 void printCache(void);
 
@@ -134,15 +135,28 @@ int cache_access(int addr, int write_flag, int write_data)
     a cache which interfaces between the simulator and memory. */
   /*  if write  */
   /*enum actionType ac = */
-  int blockaSetBitsize = ceil(log2(cache.blockSize + cache.numSets));
-  /*int blockOffSetBitsize = log2(cache.blockSize); */
-  int setAddr = (addr >> (blockaSetBitsize)) & (cache.numSets-1);//which set it is in
+  int blockaSetBitsize = ceil(log2(cache.blockSize * cache.numSets));
+  int blockOffSetBitsize = log2(cache.blockSize); 
+  int setAddr = (addr >> (blockOffSetBitsize)) & (cache.numSets-1);//which set it is in
   int blockAddr = setAddr * cache.blocksPerSet;//the starting address of the set(in block)
   int blockOffset = addr & (cache.blockSize-1);
-  int blockAddrMem = addr - blockOffset;
+  int blockAddrMem = addr - blockOffset;//the starting address of the memory block(chunck)
   int Tag = addr >> blockaSetBitsize;
   int minLRU=cache.blocksPerSet;
   int Posi;
+  #ifndef DEBUG
+  printf("%d %d %d %d %d %d %d %d \n",
+    addr,
+    blockaSetBitsize, 
+  /*int blockOffSetBitsize ze); */
+   setAddr, 
+   blockAddr, 
+   blockOffset ,
+   blockAddrMem ,
+   Tag ,
+   minLRU);
+  #endif
+
   if(write_flag){
     //check lru
     for(int i =blockAddr; i < blockAddr + cache.blocksPerSet; i++)
@@ -153,6 +167,7 @@ int cache_access(int addr, int write_flag, int write_data)
         Posi = i;
       }
     }
+    /*printf("posi = %d", Posi);*/
     //check dirty bit, write to mem
     if(cache.blocks[Posi].valid && cache.blocks[Posi].dirty){
       for(int i=0; i < cache.blockSize; i++)
@@ -163,38 +178,82 @@ int cache_access(int addr, int write_flag, int write_data)
     cache.blocks[Posi].tag = Tag;
     cache.blocks[Posi].dirty = 1;
     cache.blocks[Posi].valid = 1;
+    //bring the chunk of data writing to from mem
+    /*printf("memtocache\n");*/
+    printAction(blockAddrMem, cache.blockSize, memoryToCache);
+    for(int i=0; i < cache.blockSize; i++){
+      cache.blocks[Posi].data[i] = mem_access(blockAddrMem + i, 0, write_data);
+    }
     cache.blocks[Posi].data[blockOffset] = write_data;
+    printAction(addr, 1, processorToCache);
     //update all the lru in the blocks
     for(int i = 0; i < cache.blocksPerSet; i ++)
     {
       cache.blocks[blockAddr + i].lruLabel--;
     }
     cache.blocks[Posi].lruLabel = cache.blocksPerSet-1;
+    printCache();
   } else {
+    printf("read\n");
     //read process
     //check if cache has it. check tag in set
     for(int i=0; i < cache.blocksPerSet; i++){
       if(cache.blocks[blockAddr + i].tag == Tag && cache.blocks[blockAddr + i].valid){
         printAction(addr, 1, cacheToProcessor);
+        //lru change
+        for(int j=0; j < cache.blocksPerSet; j++)
+        {
+          cache.blocks[blockAddr+j].lruLabel--;
+        }
+        cache.blocks[blockAddr+i].lruLabel = cache.blocksPerSet-1;
+        hits ++ ;
         return cache.blocks[blockAddr + i].data[blockOffset];
       }
     }
     //didn't find it
-    //grab from mem and write it to cache
-   printAction(blockAddr, cache.blockSize,memoryToCache);
-   for(int i =blockAddr; i < blockAddr + cache.blocksPerSet; i++)
-    {
+    //get the lru one
+    #ifndef DEBUG
+    printf("didn't found it\n");
+    #endif
+    miss++;
+    minLRU = cache.blocksPerSet;
+    for(int i =blockAddr; i < blockAddr + cache.blocksPerSet; i++)
+      {
+      /*printf("lru = %d", cache.blocks[i].lruLabel);*/
       if(cache.blocks[i].lruLabel < minLRU)
       {
         minLRU = cache.blocks[i].lruLabel;
         Posi = i;
       }
     }
+    int PosiMem = (cache.blocks[Posi].tag << blockaSetBitsize) + (setAddr << blockOffSetBitsize); //position of the write back data in memory
+    //before writing, write back
+    if(cache.blocks[Posi].dirty == 1)
+    {
+      printAction(PosiMem, cache.blockSize, cacheToMemory);
+      for(int i =0 ;i < cache.blockSize; i++)
+      {
+         mem_access(cache.blocks[Posi].data[i], 1, 0);
+      }  
+    } else if(cache.blocks[Posi].valid) 
+        printAction(PosiMem, cache.blockSize, cacheToNowhere);
+
+    //write from mem to cache
+    printAction(blockAddrMem, cache.blockSize,memoryToCache);
     for(int i =0 ;i < cache.blockSize; i++)
+    {
       cache.blocks[Posi].data[i] = mem_access(blockAddrMem+i, 0, 0);
+    }
+    for(int j=0; j < cache.blocksPerSet; j++)
+    {
+      cache.blocks[blockAddr+j].lruLabel--;
+    }
+    cache.blocks[Posi].valid = 1;
+    cache.blocks[Posi].tag = Tag;
+    cache.blocks[Posi].lruLabel = cache.blocksPerSet - 1;
+    cache.blocks[Posi].dirty = 0;
     //now from caceh to processor
     printAction(addr, 1, cacheToProcessor);
-    cache.blocks[Posi].valid = 1;
     return cache.blocks[Posi].data[blockOffset];
   }
   return 0;
@@ -212,6 +271,9 @@ void printStats(void)
 {
     printCache();
     printf("End of run statistics:\n");
+    printf("num_mem_accees : %d",get_num_mem_accesses());
+    printf("miss : %d, hits: %d",miss,hits);
+    
     return;
 }
 

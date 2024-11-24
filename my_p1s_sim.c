@@ -42,6 +42,7 @@ int mem_access(int addr, int write_flag, int write_data) {
             state.numMemory = addr + 1;
         }
     }
+    /*printf("addr = %x, state[mem] = %x\n",addr, state.mem[addr]);*/
     return state.mem[addr];
 }
 int get_num_mem_accesses(){
@@ -56,7 +57,6 @@ main(int argc, char **argv)
 {
   cache_init(atoi(argv[2]), atoi(argv[3]), atoi(argv[4]));
     char line[MAXLINELENGTH];
-    stateType state;
     FILE *filePtr;
 
     if (argc != 5) {
@@ -86,8 +86,8 @@ main(int argc, char **argv)
     int hex = 0,arg0,arg1,arg2,instrNum = 0;
     while(state.pc < state.numMemory)
     {
-        printState(&state);
-        /*hex = state.mem[state.pc];*/
+        /*printState(&state);*/
+        hex = 
         cache_access(state.pc, READ, 0);
         if(((hex >> 22) & 0x7) == 0b000)//add
         {
@@ -111,6 +111,7 @@ main(int argc, char **argv)
             arg1 = (hex >> 16 ) & 0x7;
             arg2 = hex & 0xFFFF;
             /*state.reg[arg1] = state.mem[state.reg[arg0] + convertNum(arg2)];*/
+            printf("lw called cache_access\n");
             state.reg[arg1] = cache_access(state.reg[arg0] + convertNum(arg2), READ, 0);
             state.pc++;
         }
@@ -120,6 +121,7 @@ main(int argc, char **argv)
             arg1 = (hex >> 16 ) & 0x7;
             arg2 = hex & 0xFFFF;
             /*state.mem[state.reg[arg0] + convertNum(arg2)] = state.reg[arg1];*/
+            printf("sw called cache_access\n");
             cache_access(state.reg[arg0] + convertNum(arg2), WRITE, state.reg[arg1]);  
             state.pc++;
         }
